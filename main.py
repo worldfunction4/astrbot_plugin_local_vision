@@ -38,41 +38,84 @@ class LocalVisionPlugin(star.Star):
 
         logger.info(f"[LocalVision] 插件已加载，识图服务: {self.vision_api_url}, 模型: {self.ollama_model}")
 
-    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE, priority=10)
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE, priority=999)
     async def on_friend_message(self, event: AstrMessageEvent) -> AsyncGenerator:
         """处理私聊消息"""
-        async for result in self._handle_image(event):
-            yield result
-
-    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=10)
-    async def on_group_message(self, event: AstrMessageEvent) -> AsyncGenerator:
-        """处理群聊消息"""
-        async for result in self._handle_image(event):
-            yield result
-
-    async def _handle_image(self, event: AstrMessageEvent) -> AsyncGenerator:
-        """图片处理主逻辑"""
         if not self.enable_auto_reply:
             return
-
-        # 群聊触发控制：如果开启了 group_require_at，则群聊中必须 @ 机器人
-        is_group = event.get_group_id() is not None
-        if is_group and self.group_require_at:
-            if not self._is_at_me(event):
-                return
-
-        # 提取图片路径
-        image_path = self._extract_image_path(event)
-        if not image_path:
-            return
-
-        logger.info(f"[LocalVision] 检测到图片: {image_path}")
 
         # 获取被引用消息的 ID（如果有）
         reply_to_id = getattr(event.message_obj, 'reply_to_id', None) if hasattr(event, 'message_obj') else None
 
+        image_path = self._extract_image_path(event)
+        if not image_path:
+            return
+
+        logger.info(f"[LocalVision] 检测到私聊图片: {image_path}")
+        event.should_call_llm(True)  # 阻止默认 LLM 处理图片
+        event.stop_event()  # 阻止其他插件处理
+
         try:
-            # 读取图片数据
+            image_data = await self._read_image(image_path)
+            if not image_data:
+                logger.warning(f"[LocalVision] 图片读取失败: {image_path}")
+                return
+
+            # 检查图片大小
+            size_mb = len(image_data) / (1024 * 1024)
+            if size_mb > self.max_image_size_mb:
+                yield event.plain_result(f"图片太大了({size_mb:.1f}MB)，我处理不了...", reply_to=reply_to_id)
+                return
+
+            # 调用识图服务
+            logger.info("[LocalVision] 正在调用本地识图服务...")
+            description = await self._analyze_image(image_data)
+
+            if description:
+                reply = f"{self.reply_prefix}{description}" if self.reply_prefix else description
+                logger.info(f"[LocalVision] 识图成功，描述长度: {len(description)}")
+                yield event.plain_result(reply, reply_to=reply_to_id)
+            else:
+                yield event.plain_result("嗯...我看不太清楚这张图片", reply_to=reply_to_id)
+
+        except ModelNotFoundError as e:
+            yield event.plain_result(
+                f"❌ 识图失败：本地未找到模型 {e.model}\n"
+                f"请在运行 vision_server 的机器上执行：\n"
+                f"ollama pull {e.model}",
+                reply_to=reply_to_id
+            )
+        except aiohttp.ClientConnectorError:
+            yield event.plain_result("❌ 无法连接到识图服务，请确认 vision_server.py 已在本地启动", reply_to=reply_to_id)
+        except Exception as e:
+            logger.error(f"[LocalVision] 处理图片时出错: {e}", exc_info=True)
+            yield event.plain_result("识别图片时出了点问题...", reply_to=reply_to_id)
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=999)
+    async def on_group_message(self, event: AstrMessageEvent) -> AsyncGenerator:
+        """处理群聊消息"""
+        if not self.enable_auto_reply:
+            return
+
+        # 获取被引用消息的 ID（如果有）
+        reply_to_id = getattr(event.message_obj, 'reply_to_id', None) if hasattr(event, 'message_obj') else None
+
+        # 检查是否有图片（无论是否 @）
+        image_path = self._extract_image_path(event)
+        if not image_path:
+            # 没有图片，不处理
+            return
+
+        # 群聊触发控制：有图片时才检查 @
+        if self.group_require_at and not self._is_at_me(event):
+            logger.debug("[LocalVision] 群聊消息未 @ 机器人，跳过")
+            return
+
+        logger.info(f"[LocalVision] 检测到群聊图片: {image_path}")
+        event.should_call_llm(True)  # 阻止默认 LLM 处理图片
+        event.stop_event()  # 阻止其他插件处理
+
+        try:
             image_data = await self._read_image(image_path)
             if not image_data:
                 logger.warning(f"[LocalVision] 图片读取失败: {image_path}")
@@ -112,21 +155,31 @@ class LocalVisionPlugin(star.Star):
         """检查消息是否 @ 了机器人"""
         try:
             if not hasattr(event, 'message_obj') or not event.message_obj:
+                logger.debug("[LocalVision] @ 检测：消息对象为空")
                 return False
 
             message = event.message_obj.message
             if not message:
+                logger.debug("[LocalVision] @ 检测：消息链为空")
                 return False
+
+            self_id = str(event.get_self_id())
+            logger.debug(f"[LocalVision] @ 检测：机器人 ID = {self_id}")
 
             # 遍历消息链，查找 At 类型的消息段
             for segment in message:
                 seg_type = str(getattr(segment, "type", ""))
+                logger.debug(f"[LocalVision] @ 检测：消息段类型 = {seg_type}")
+
                 if "At" in seg_type or "at" in seg_type:
-                    # 检查是否 @ 的是机器人自己
                     qq = getattr(segment, "qq", None)
+                    logger.debug(f"[LocalVision] @ 检测：@ 的 QQ = {qq}")
+
                     if qq and str(qq) == str(event.get_self_id()):
+                        logger.info("[LocalVision] @ 检测：确认 @ 了机器人")
                         return True
 
+            logger.debug("[LocalVision] @ 检测：未找到 @ 机器人的消息段")
             return False
 
         except Exception as e:
@@ -137,14 +190,17 @@ class LocalVisionPlugin(star.Star):
         """从消息事件中提取图片路径或 URL"""
         try:
             if not hasattr(event, "message_obj") or not event.message_obj:
+                logger.debug("[LocalVision] 消息对象为空")
                 return None
 
             message = event.message_obj.message
             if not message:
+                logger.debug("[LocalVision] 消息链为空")
                 return None
 
             for segment in message:
                 seg_type = str(getattr(segment, "type", ""))
+                logger.debug(f"[LocalVision] 消息段类型: {seg_type}")
 
                 if "Image" not in seg_type and "image" not in seg_type:
                     continue
@@ -152,6 +208,8 @@ class LocalVisionPlugin(star.Star):
                 url = getattr(segment, "url", None)
                 path = getattr(segment, "path", None)
                 file = getattr(segment, "file", None)
+
+                logger.debug(f"[LocalVision] 图片字段 - url: {url}, path: {path}, file: {file}")
 
                 # url 字段：HTTP 链接（QQ 等平台优先用这个）
                 if url and url.strip():
@@ -165,6 +223,7 @@ class LocalVisionPlugin(star.Star):
                 if file and file.strip() and file.startswith("/"):
                     return file.strip()
 
+            logger.debug("[LocalVision] 未找到有效的图片路径")
             return None
 
         except Exception as e:
