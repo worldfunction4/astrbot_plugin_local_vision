@@ -1,0 +1,42 @@
+{
+  "local_vision_api_url": {
+    "type": "string",
+    "default": "http://100.64.0.1:8765/analyze",
+    "description": "本地识图服务的 API 地址（通过 Tailscale VPN 访问）"
+  },
+  "enable_auto_reply": {
+    "type": "bool",
+    "default": true,
+    "description": "是否自动识别图片并回复"
+  },
+  "reply_prefix": {
+    "type": "string",
+    "default": "",
+    "description": "回复内容的前缀（可选）"
+  },
+  "timeout_seconds": {
+    "type": "int",
+    "default": 30,
+    "description": "识图服务超时时间（秒）"
+  },
+  "max_image_size_mb": {
+    "type": "int",
+    "default": 10,
+    "description": "最大图片大小（MB）"
+  },
+  "custom_prompt": {
+    "type": "string",
+    "default": "",
+    "description": "自定义识图提示词（留空使用默认提示词）"
+  },
+  "ollama_model": {
+    "type": "string",
+    "default": "llava:7b",
+    "description": "Ollama 视觉模型名称（需已通过 ollama pull 下载），例如 llava:7b、llava:13b、llava-llama3"
+  },
+  "group_require_at": {
+    "type": "bool",
+    "default": true,
+    "description": "群聊中是否需要 @ 机器人才触发识图（推荐开启，避免误触发）"
+  }
+}

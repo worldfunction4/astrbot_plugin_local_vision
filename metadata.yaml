@@ -1,0 +1,10 @@
+name: astrbot_plugin_local_vision
+display_name: "本地图片识别"
+desc: "通过本地 Ollama 视觉模型识别图片内容，支持 QQ、微信等平台"
+version: 1.0.0
+author: layyes
+repo: ""
+astrbot_version: ">=4.8.0"
+support_platforms:
+  - aiocqhttp
+  - weixin_oc
