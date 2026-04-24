@@ -44,9 +44,6 @@ class LocalVisionPlugin(star.Star):
         if not self.enable_auto_reply:
             return
 
-        # 获取被引用消息的 ID（如果有）
-        reply_to_id = getattr(event.message_obj, 'reply_to_id', None) if hasattr(event, 'message_obj') else None
-
         image_path = self._extract_image_path(event)
         if not image_path:
             return
@@ -64,7 +61,7 @@ class LocalVisionPlugin(star.Star):
             # 检查图片大小
             size_mb = len(image_data) / (1024 * 1024)
             if size_mb > self.max_image_size_mb:
-                yield event.plain_result(f"图片太大了({size_mb:.1f}MB)，我处理不了...", reply_to=reply_to_id)
+                yield event.plain_result(f"图片太大了({size_mb:.1f}MB)，我处理不了...")
                 return
 
             # 调用识图服务
@@ -74,31 +71,27 @@ class LocalVisionPlugin(star.Star):
             if description:
                 reply = f"{self.reply_prefix}{description}" if self.reply_prefix else description
                 logger.info(f"[LocalVision] 识图成功，描述长度: {len(description)}")
-                yield event.plain_result(reply, reply_to=reply_to_id)
+                yield event.plain_result(reply)
             else:
-                yield event.plain_result("嗯...我看不太清楚这张图片", reply_to=reply_to_id)
+                yield event.plain_result("嗯...我看不太清楚这张图片")
 
         except ModelNotFoundError as e:
             yield event.plain_result(
                 f"❌ 识图失败：本地未找到模型 {e.model}\n"
                 f"请在运行 vision_server 的机器上执行：\n"
-                f"ollama pull {e.model}",
-                reply_to=reply_to_id
+                f"ollama pull {e.model}"
             )
         except aiohttp.ClientConnectorError:
-            yield event.plain_result("❌ 无法连接到识图服务，请确认 vision_server.py 已在本地启动", reply_to=reply_to_id)
+            yield event.plain_result("❌ 无法连接到识图服务，请确认 vision_server.py 已在本地启动")
         except Exception as e:
             logger.error(f"[LocalVision] 处理图片时出错: {e}", exc_info=True)
-            yield event.plain_result("识别图片时出了点问题...", reply_to=reply_to_id)
+            yield event.plain_result("识别图片时出了点问题...")
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=999)
     async def on_group_message(self, event: AstrMessageEvent) -> AsyncGenerator:
         """处理群聊消息"""
         if not self.enable_auto_reply:
             return
-
-        # 获取被引用消息的 ID（如果有）
-        reply_to_id = getattr(event.message_obj, 'reply_to_id', None) if hasattr(event, 'message_obj') else None
 
         # 检查是否有图片（无论是否 @）
         image_path = self._extract_image_path(event)
@@ -124,7 +117,7 @@ class LocalVisionPlugin(star.Star):
             # 检查图片大小
             size_mb = len(image_data) / (1024 * 1024)
             if size_mb > self.max_image_size_mb:
-                yield event.plain_result(f"图片太大了({size_mb:.1f}MB)，我处理不了...", reply_to=reply_to_id)
+                yield event.plain_result(f"图片太大了({size_mb:.1f}MB)，我处理不了...")
                 return
 
             # 调用识图服务
@@ -134,22 +127,21 @@ class LocalVisionPlugin(star.Star):
             if description:
                 reply = f"{self.reply_prefix}{description}" if self.reply_prefix else description
                 logger.info(f"[LocalVision] 识图成功，描述长度: {len(description)}")
-                yield event.plain_result(reply, reply_to=reply_to_id)
+                yield event.plain_result(reply)
             else:
-                yield event.plain_result("嗯...我看不太清楚这张图片", reply_to=reply_to_id)
+                yield event.plain_result("嗯...我看不太清楚这张图片")
 
         except ModelNotFoundError as e:
             yield event.plain_result(
                 f"❌ 识图失败：本地未找到模型 {e.model}\n"
                 f"请在运行 vision_server 的机器上执行：\n"
-                f"ollama pull {e.model}",
-                reply_to=reply_to_id
+                f"ollama pull {e.model}"
             )
         except aiohttp.ClientConnectorError:
-            yield event.plain_result("❌ 无法连接到识图服务，请确认 vision_server.py 已在本地启动", reply_to=reply_to_id)
+            yield event.plain_result("❌ 无法连接到识图服务，请确认 vision_server.py 已在本地启动")
         except Exception as e:
             logger.error(f"[LocalVision] 处理图片时出错: {e}", exc_info=True)
-            yield event.plain_result("识别图片时出了点问题...", reply_to=reply_to_id)
+            yield event.plain_result("识别图片时出了点问题...")
 
     def _is_at_me(self, event: AstrMessageEvent) -> bool:
         """检查消息是否 @ 了机器人"""
